@@ -1,73 +1,115 @@
 import streamlit as st
 import pandas as pd
 import joblib
-import os
+from pathlib import Path
 
-st.set_page_config(page_title="Credit Card Customer Clustering", page_icon="💳", layout="wide")
+st.set_page_config(
+    page_title="Credit Card Customer Segmentation",
+    page_icon="💳",
+    layout="wide"
+)
 
-MODEL_PATH = os.path.join("model", "kmeans_pipeline.joblib")
+MODEL_PATH = Path("model/kmeans_pipeline.joblib")
+
+st.title("💳 Credit Card Customer Segmentation")
+st.caption("K-Means clustering berdasarkan pipeline yang digunakan pada notebook CRISP-DM.")
 
 @st.cache_resource
 def load_model():
+    if not MODEL_PATH.exists():
+        return None
     return joblib.load(MODEL_PATH)
 
-artifact = load_model()
-pipeline = artifact["pipeline"]
-features = artifact["features"]
-final_k = artifact["final_k"]
+model_data = load_model()
 
-st.title("💳 Credit Card Customer Clustering")
+if model_data is None:
+    st.error(
+        "Model belum ditemukan. Jalankan cell Deployment Preparation pada notebook "
+        "terlebih dahulu agar file model/kmeans_pipeline.joblib terbentuk."
+    )
+    st.stop()
+
+pipeline = model_data["pipeline"]
+feature_cols = model_data["features"]
+final_k = model_data["final_k"]
+
+st.sidebar.header("Model Information")
+st.sidebar.write(f"Jumlah cluster: **{final_k}**")
+st.sidebar.write(f"Jumlah fitur: **{len(feature_cols)}**")
+st.sidebar.write("Preprocessing: Median Imputation + StandardScaler")
+st.sidebar.write("Model: K-Means")
+
+st.subheader("Prediksi Cluster Pelanggan")
 st.write(
-    "Aplikasi segmentasi pelanggan kartu kredit menggunakan K-Means "
-    "berdasarkan dataset CC GENERAL dari Kaggle."
+    "Masukkan data numerik pelanggan di bawah ini. "
+    "Model akan menentukan cluster berdasarkan pipeline hasil training."
 )
 
-st.info(
-    f"Model menggunakan K-Means dengan {final_k} cluster. "
-    "Hasil cluster merupakan segmentasi statistik, bukan label bisnis yang bersifat mutlak."
-)
-
-st.subheader("Input Data Pelanggan")
-
-# Default values are simple dataset medians, so the form is immediately usable.
-default_row = {
-    col: 0.0 for col in features
+# Nilai default dibuat 0 agar aplikasi langsung dapat dijalankan.
+# User dapat mengganti seluruh nilai sesuai data pelanggan.
+default_values = {
+    "BALANCE": 0.0,
+    "BALANCE_FREQUENCY": 0.0,
+    "PURCHASES": 0.0,
+    "ONEOFF_PURCHASES": 0.0,
+    "INSTALLMENTS_PURCHASES": 0.0,
+    "CASH_ADVANCE": 0.0,
+    "PURCHASES_FREQUENCY": 0.0,
+    "ONEOFF_PURCHASES_FREQUENCY": 0.0,
+    "PURCHASES_INSTALLMENTS_FREQUENCY": 0.0,
+    "CASH_ADVANCE_FREQUENCY": 0.0,
+    "CASH_ADVANCE_TRX": 0.0,
+    "PURCHASES_TRX": 0.0,
+    "CREDIT_LIMIT": 0.0,
+    "PAYMENTS": 0.0,
+    "MINIMUM_PAYMENTS": 0.0,
+    "PRC_FULL_PAYMENT": 0.0,
+    "TENURE": 0.0,
 }
-try:
-    df_reference = pd.read_csv("CC_GENERAL.csv")
-    medians = df_reference[features].median(numeric_only=True).to_dict()
-    default_row.update(medians)
-except Exception:
-    pass
 
-# Organize inputs in three columns.
-cols = st.columns(3)
-input_data = {}
+with st.form("customer_form"):
+    values = {}
 
-for i, feature in enumerate(features):
-    with cols[i % 3]:
-        input_data[feature] = st.number_input(
-            feature,
-            value=float(default_row.get(feature, 0.0)),
-            format="%.4f"
-        )
+    col1, col2 = st.columns(2)
 
-if st.button("Prediksi Cluster", type="primary"):
-    input_df = pd.DataFrame([input_data], columns=features)
+    for i, feature in enumerate(feature_cols):
+        target_col = col1 if i % 2 == 0 else col2
+
+        with target_col:
+            values[feature] = st.number_input(
+                feature,
+                min_value=0.0,
+                value=float(default_values.get(feature, 0.0)),
+                format="%.4f",
+                help=f"Nilai numerik untuk fitur {feature}."
+            )
+
+    submitted = st.form_submit_button(
+        "🔍 Prediksi Cluster",
+        use_container_width=True
+    )
+
+if submitted:
+    input_df = pd.DataFrame([values], columns=feature_cols)
     prediction = int(pipeline.predict(input_df)[0])
 
     st.success(f"Pelanggan diprediksi masuk ke **Cluster {prediction}**.")
-    st.caption(
-        "Interpretasikan cluster berdasarkan profil statistik pada notebook. "
-        "Model tidak memberikan diagnosis atau keputusan kredit."
-    )
+
+    st.subheader("Data yang Digunakan")
+    st.dataframe(input_df, use_container_width=True)
 
 st.divider()
-st.subheader("Tentang Dataset")
-st.markdown(
-    "Sumber: [Kaggle — Credit Card Dataset](https://www.kaggle.com/datasets/arjunbhasin2013/ccdata)"
-)
+
+st.subheader("Tentang Model")
 st.write(
-    "Fitur yang digunakan berasal dari data saldo, pembelian, cash advance, "
-    "frekuensi transaksi, limit kredit, pembayaran, dan tenure."
+    "Model ini menggunakan K-Means Clustering untuk mengelompokkan pelanggan "
+    "berdasarkan pola saldo, pembelian, cash advance, pembayaran, limit kredit, "
+    "frekuensi transaksi, dan tenure. Cluster merupakan hasil unsupervised learning "
+    "sehingga tidak memiliki label bisnis bawaan."
+)
+
+st.info(
+    "Catatan: interpretasi Cluster 0 dan Cluster 1 mengikuti profil statistik "
+    "yang dihasilkan pada notebook. Prediksi cluster hanya bermakna jika fitur "
+    "input menggunakan definisi dan satuan yang sama dengan data training."
 )
